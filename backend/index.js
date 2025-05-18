@@ -1,0 +1,543 @@
+import express from 'express';
+import dotenv from 'dotenv';
+import mysql from 'mysql2/promise';
+import cors from 'cors';
+
+dotenv.config();
+
+const app = express();
+app.use(express.json());
+
+// Configure CORS
+app.use(cors({
+  origin: '*',  // Allow requests from any origin during development
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+const pool = mysql.createPool({
+  host: process.env.MYSQL_HOST,
+  user: process.env.MYSQL_USER,
+  password: process.env.MYSQL_PASSWORD,
+  database: process.env.MYSQL_DATABASE,
+  port: process.env.MYSQL_PORT
+});
+
+// 0. Misc/Test
+app.get('/api/test', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT NOW() AS now');
+    res.json({ success: true, time: rows[0].now });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 1. Auth
+app.post('/register', async (req, res) => {
+  const { username, password, email, statut } = req.body;
+  if (!username || !password || !email || !statut) {
+    return res.status(400).json({ success: false, error: 'Missing fields' });
+  }
+  try {
+    // Check if email already exists
+    const [existing] = await pool.query('SELECT UserID FROM Utilisateur WHERE Email = ?', [email]);
+    if (existing.length > 0) {
+      return res.status(409).json({ success: false, error: 'Email already registered' });
+    }
+    // Store password in plain text
+    await pool.query(
+      'INSERT INTO Utilisateur (Nom, Password, Email, Statut) VALUES (?, ?, ?, ?)',
+      [username, password, email, statut]
+    );
+    res.json({ success: true, message: 'User registered' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/login', async (req, res) => {
+  const { email, password } = req.body;
+  
+  if (!email || !password) {
+    return res.status(400).json({ success: false, error: 'Missing fields' });
+  }
+  
+  try {
+    // Explicitly specify all needed columns
+    const [users] = await pool.query('SELECT UserID, Nom, Email, Password, Statut FROM Utilisateur WHERE Email = ?', [email]);
+    
+    if (users.length === 0) {
+      return res.status(401).json({ success: false, error: 'Invalid credentials' });
+    }
+    
+    const user = users[0];
+    
+    // Simple direct password comparison
+    if (password !== user.Password) {
+      return res.status(401).json({ success: false, error: 'Invalid credentials' });
+    }
+    
+    // Return user info (excluding password)
+    res.json({
+      success: true,
+      user: {
+        id: user.UserID,
+        username: user.Nom,
+        email: user.Email,
+        statut: user.Statut
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 2. User Profile
+app.get('/api/user/:userId', async (req, res) => {
+  const userId = req.params.userId;
+  try {
+    const [rows] = await pool.query(
+      'SELECT UserID, Nom AS username, Email, Statut FROM Utilisateur WHERE UserID = ?',
+      [userId]
+    );
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+    res.json({ success: true, user: rows[0] });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.put('/api/user/:userId', async (req, res) => {
+  const userId = req.params.userId;
+  const { username, email, statut } = req.body;
+  if (!username || !email || !statut) {
+    return res.status(400).json({ success: false, error: 'Missing fields' });
+  }
+  try {
+    await pool.query(
+      'UPDATE Utilisateur SET Nom = ?, Email = ?, Statut = ? WHERE UserID = ?',
+      [username, email, statut, userId]
+    );
+    res.json({ success: true, message: 'User profile updated' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/add-user', async (req, res) => {
+  const { username, password, email, statut } = req.body;
+  if (!username || !password || !email || !statut) {
+    return res.status(400).json({ success: false, error: 'Missing fields' });
+  }
+  try {
+    // Store password as plain text when calling the procedure
+    await pool.query('CALL AddNewUser(?, ?, ?, ?)', [username, password, email, statut]);
+    res.json({ success: true, message: 'User added via procedure' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Admin routes
+app.get('/api/admin/users', async (req, res) => {
+  // Check if user is admin
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return res.status(401).json({ success: false, error: 'Authorization required' });
+  }
+
+  try {
+    const userId = parseInt(authHeader.split(' ')[1]);
+    const [admins] = await pool.query(
+      'SELECT UserID FROM Utilisateur WHERE UserID = ? AND Statut = "Admin"',
+      [userId]
+    );
+    
+    if (admins.length === 0) {
+      return res.status(403).json({ success: false, error: 'Admin access required' });
+    }
+    
+    // Get all users
+    const [users] = await pool.query('SELECT UserID, Nom, Email, Statut FROM Utilisateur');
+    res.json({ success: true, data: users });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.put('/api/admin/users/:userId', async (req, res) => {
+  const targetUserId = req.params.userId;
+  const { statut } = req.body;
+  
+  // Check if user is admin
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return res.status(401).json({ success: false, error: 'Authorization required' });
+  }
+
+  try {
+    const adminId = parseInt(authHeader.split(' ')[1]);
+    const [admins] = await pool.query(
+      'SELECT UserID FROM Utilisateur WHERE UserID = ? AND Statut = "Admin"',
+      [adminId]
+    );
+    
+    if (admins.length === 0) {
+      return res.status(403).json({ success: false, error: 'Admin access required' });
+    }
+    
+    // Update user status
+    await pool.query(
+      'UPDATE Utilisateur SET Statut = ? WHERE UserID = ?',
+      [statut, targetUserId]
+    );
+    
+    res.json({ success: true, message: 'User status updated' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete('/api/admin/users/:userId', async (req, res) => {
+  const targetUserId = req.params.userId;
+  
+  // Check if user is admin
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return res.status(401).json({ success: false, error: 'Authorization required' });
+  }
+
+  try {
+    const adminId = parseInt(authHeader.split(' ')[1]);
+    const [admins] = await pool.query(
+      'SELECT UserID FROM Utilisateur WHERE UserID = ? AND Statut = "Admin"',
+      [adminId]
+    );
+    
+    if (admins.length === 0) {
+      return res.status(403).json({ success: false, error: 'Admin access required' });
+    }
+    
+    // Delete user
+    await pool.query('DELETE FROM Utilisateur WHERE UserID = ?', [targetUserId]);
+    
+    res.json({ success: true, message: 'User deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 3. Game Management
+app.get('/api/games', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM Jeu');
+    res.json({ success: true, data: rows });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Route pour récupérer un jeu spécifique par ID
+app.get('/api/games/:id', async (req, res) => {
+  const gameId = req.params.id;
+  try {
+    const [rows] = await pool.query('SELECT * FROM Jeu WHERE JeuID = ?', [gameId]);
+    
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Jeu non trouvé' });
+    }
+    
+    res.json({ success: true, data: rows[0] });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/games', async (req, res) => {
+  const { nom, description, age_min, age_max, min_players, max_players, categorie_id, createur_id } = req.body;
+  console.log('POST /api/games body:', req.body);
+  if (!nom || !description || age_min == null || age_max == null || min_players == null || max_players == null || !categorie_id || !createur_id) {
+    return res.status(400).json({ success: false, error: 'Missing fields' });
+  }
+  try {
+    // Use correct column names
+    const [result] = await pool.query(
+      'INSERT INTO Jeu (Nom, description, MinAge, MaxAge, MinPlayers, MaxPlayers) VALUES (?, ?, ?, ?, ?, ?)',
+      [nom, description, age_min, age_max, min_players, max_players]
+    );
+    const jeuId = result.insertId;
+
+    await pool.query(
+      'INSERT INTO CategorieJeu (JeuID, CategorieID) VALUES (?, ?)',
+      [jeuId, categorie_id]
+    );
+
+    await pool.query(
+      'INSERT INTO CreationJeu (UserID, JeuID) VALUES (?, ?)',
+      [createur_id, jeuId]
+    );
+
+    res.json({ success: true, message: 'Game added' });
+  } catch (err) {
+    // Gestion d'erreur explicite pour violation de trigger SQL ou clé étrangère
+    if (
+      err.code === 'ER_SIGNAL_EXCEPTION' ||
+      (err.errno === 1644) ||
+      (err.sqlState === '45000') ||
+      (err.message && (
+        err.message.includes('Seuls les éditeurs') ||
+        err.message.includes('a déjà noté ce jeu') ||
+        err.message.includes('Cannot add or update a child row') ||
+        err.message.includes('a foreign key constraint fails')
+      ))
+    ) {
+      return res.status(403).json({ success: false, error: err.message });
+    }
+    console.error('Error in POST /api/games:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.put('/api/games/:jeuId', async (req, res) => {
+  const jeuId = req.params.jeuId;
+  const { nom, description, age_min, age_max, categorie_id } = req.body;
+  if (!nom || !description || !age_min || !age_max || !categorie_id) {
+    return res.status(400).json({ success: false, error: 'Missing fields' });
+  }
+  try {
+    await pool.query(
+      'UPDATE Jeu SET Nom = ?, Description = ?, AgeMin = ?, AgeMax = ?, CategorieID = ? WHERE JeuID = ?',
+      [nom, description, age_min, age_max, categorie_id, jeuId]
+    );
+    res.json({ success: true, message: 'Game updated' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete('/api/games/:jeuId', async (req, res) => {
+  const jeuId = req.params.jeuId;
+  try {
+    await pool.query('DELETE FROM Jeu WHERE JeuID = ?', [jeuId]);
+    res.json({ success: true, message: 'Game deleted' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/game-full-details/:jeuId', async (req, res) => {
+  const jeuId = req.params.jeuId;
+  try {
+    const [results] = await pool.query('CALL GetGameFullDetails(?)', [jeuId]);
+    // MySQL returns an array of result sets, one for each SELECT in the procedure
+    res.json({
+      success: true,
+      designers: results[0],
+      categories: results[1],
+      familles: results[2],
+      mechaniques: results[3],
+      artistes: results[4],
+      extensions: results[5],
+      implementations: results[6],
+      avis: results[7],
+      commentaires: results[8]
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/jeux-disponibles', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM Vue_JeuxDisponibles');
+    res.json({ success: true, data: rows });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/games-by-age-range', async (req, res) => {
+  const min_age = parseInt(req.query.min_age, 10);
+  const max_age = parseInt(req.query.max_age, 10);
+  if (isNaN(min_age) || isNaN(max_age)) {
+    return res.status(400).json({ success: false, error: 'Missing or invalid min_age or max_age' });
+  }
+  try {
+    const [rows] = await pool.query('CALL GetGamesByAgeRange(?, ?)', [min_age, max_age]);
+    res.json({ success: true, data: rows[0] });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/jeux-crees/:userId', async (req, res) => {
+  const userId = req.params.userId;
+  try {
+    const [rows] = await pool.query('SELECT GetJeuxCreePar(?) AS nb_jeux', [userId]);
+    res.json({ success: true, nb_jeux: rows[0].nb_jeux });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/categories', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM Categorie');
+    res.json({ success: true, data: rows });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 4. Favorites Management
+app.post('/api/add-favorite', async (req, res) => {
+  const { userId, jeuId } = req.body;
+  if (!userId || !jeuId) {
+    return res.status(400).json({ success: false, error: 'Missing fields' });
+  }
+  try {
+    await pool.query('CALL AddFavoriteGame(?, ?)', [userId, jeuId]);
+    res.json({ success: true, message: 'Favorite game added' });
+  } catch (err) {
+    // Gestion explicite du trigger SQL (limite de 20 favoris)
+    if (
+      err.code === 'ER_SIGNAL_EXCEPTION' ||
+      (err.errno === 1644) ||
+      (err.sqlState === '45000') ||
+      (err.message && err.message.includes('plus de 20 jeux favoris'))
+    ) {
+      return res.status(403).json({ success: false, error: "Vous ne pouvez pas avoir plus de 20 jeux favoris." });
+    }
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/user-favorites/:userId', async (req, res) => {
+  const userId = req.params.userId;
+  try {
+    const [rows] = await pool.query('CALL GetUsersFavoriteGames(?)', [userId]);
+    res.json({ success: true, data: rows[0] });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete('/api/remove-favorite', async (req, res) => {
+  const { userId, jeuId } = req.body;
+  if (!userId || !jeuId) {
+    return res.status(400).json({ success: false, error: 'Missing fields' });
+  }
+  try {
+    await pool.query('DELETE FROM JeuFavoriUser WHERE UserID = ? AND JeuID = ?', [userId, jeuId]);
+    res.json({ success: true, message: 'Favorite removed' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 5. Reviews Management
+app.post('/api/add-review', async (req, res) => {
+  const { contenu, note, jeuId, userId } = req.body;
+  if (!contenu || !note || !jeuId || !userId) {
+    return res.status(400).json({ success: false, error: 'Missing fields' });
+  }
+  try {
+    await pool.query('CALL AddReview(?, ?, ?, ?)', [contenu, note, jeuId, userId]);
+    res.json({ success: true, message: 'Review added' });
+  } catch (err) {
+    // Gestion de l'erreur du trigger (SQLSTATE '45000')
+    if (
+      err.code === 'ER_SIGNAL_EXCEPTION' ||
+      (err.errno === 1644) ||
+      (err.sqlState === '45000') ||
+      (err.message && err.message.includes('déjà noté ce jeu'))
+    ) {
+      return res.status(409).json({ success: false, error: "Vous avez déjà laissé un avis pour ce jeu." });
+    }
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/reviews-for-game/:jeuId', async (req, res) => {
+  const jeuId = req.params.jeuId;
+  try {
+    const [rows] = await pool.query('CALL GetReviewsForGame(?)', [jeuId]);
+    // MySQL procedures return results as [rows, fields], rows[0] is the actual data
+    res.json({ success: true, data: rows[0] });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/user-reviews/:userId', async (req, res) => {
+  const userId = req.params.userId;
+  try {
+    const [rows] = await pool.query(
+      `SELECT a.AvisID, a.Contenu, a.Note, a.JeuID, j.Nom AS JeuNom, a.DateAvis
+       FROM Avis a
+       JOIN Jeu j ON a.JeuID = j.JeuID
+       WHERE a.UserID = ?`,
+      [userId]
+    );
+    res.json({ success: true, data: rows });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete('/api/review/:reviewId', async (req, res) => {
+  const reviewId = req.params.reviewId;
+  try {
+    await pool.query('DELETE FROM Avis WHERE AvisID = ?', [reviewId]);
+    res.json({ success: true, message: 'Review deleted' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/count-avis/:jeuId', async (req, res) => {
+  const jeuId = req.params.jeuId;
+  try {
+    const [rows] = await pool.query('SELECT CountAvis(?) AS avis_count', [jeuId]);
+    res.json({ success: true, avis_count: rows[0].avis_count });
+  } catch (err) {
+    res.status (500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/average-note/:jeuId', async (req, res) => {
+  const jeuId = req.params.jeuId;
+  try {
+    const [rows] = await pool.query('SELECT GetAverageNote(?) AS average_note', [jeuId]);
+    res.json({ success: true, average_note: rows[0].average_note });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/avis-par-jeu', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM Vue_AvisParJeu');
+    res.json({ success: true, data: rows });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/age-moyen-categorie/:catId', async (req, res) => {
+  const catId = req.params.catId;
+  try {
+    const [rows] = await pool.query('SELECT AgeMoyenCategorie(?) AS age_moyen', [catId]);
+    res.json({ success: true, age_moyen: rows[0].age_moyen });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Serveur démarré sur le port ${PORT}`);
+});
