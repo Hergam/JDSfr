@@ -83,14 +83,7 @@ function GamesList({ games = [], loading = false, renderActions }) {
                   )
                 }
                 title={game.Nom || "Jeu sans nom"}
-                actions={[
-                  <Link to={`/game/${game.JeuID}`}>
-                    <Button type="primary" icon={<EyeOutlined />}>
-                      Détails
-                    </Button>
-                  </Link>,
-                  renderActions && renderActions(game)
-                ]}
+                actions={[]}
               >
                 <div className="game-info">
                   <p><strong>Âge minimum:</strong> {game.MinAge || "?"} ans</p>
@@ -98,6 +91,13 @@ function GamesList({ games = [], loading = false, renderActions }) {
                   {game.Average && (
                     <Tag color="blue">Note: {game.Average}</Tag>
                   )}
+                </div>
+                {/* Centrage des boutons Détails et Favoris */}
+                <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginTop: 16 }}>
+                  <Link to={`/game/${game.JeuID}`}>
+                    <Button type="primary">Détails</Button>
+                  </Link>
+                  {renderActions && renderActions(game)}
                 </div>
               </Card>
             </List.Item>

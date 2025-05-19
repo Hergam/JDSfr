@@ -253,7 +253,7 @@ function GameDetails() {
               label="Note"
               rules={[{ required: true, message: 'Veuillez donner une note' }]}
             >
-              <Rate />
+              <Rate count={5} allowHalf />
             </Form.Item>
             <Form.Item
               name="contenu"
@@ -287,7 +287,7 @@ function GameDetails() {
                   <div>
                     <Text strong>{review.UserName || 'Anonyme'}</Text>
                     <div style={{ marginTop: 5 }}>
-                      <Rate disabled defaultValue={parseInt(review.Note) || 0} />
+                      <Rate disabled count={5} allowHalf defaultValue={parseFloat(review.Note) || 0} />
                     </div>
                   </div>
                 </div>

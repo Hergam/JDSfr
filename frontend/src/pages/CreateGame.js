@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, Typography, Form, Input, Button, Select, message, Spin, Slider } from 'antd';
+import { Card, Typography, Form, Input, Button, Select, message, Spin, Slider, InputNumber } from 'antd';
 import api from '../services/api';
 
 const { Title } = Typography;
@@ -47,6 +47,14 @@ function CreateGame() {
   const onFinish = async (values) => {
     setSubmitting(true);
     try {
+      // Conversion minutes -> HH:MM:00
+      let playingTime = null;
+      if (values.playing_time !== undefined && values.playing_time !== null) {
+        const min = parseInt(values.playing_time, 10) || 0;
+        const h = Math.floor(min / 60);
+        const m = min % 60;
+        playingTime = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:00`;
+      }
       await api.post('/api/games', {
         nom: values.nom,
         description: values.description,
@@ -54,7 +62,8 @@ function CreateGame() {
         age_max: values.age_range[1],
         min_players: values.players_range[0],
         max_players: values.players_range[1],
-        categorie_id: values.categorie_id,
+        playing_time: playingTime,
+        categorie_ids: values.categorie_ids,
         createur_id: user.id
       });
       message.success('Jeu créé avec succès !');
@@ -123,11 +132,25 @@ function CreateGame() {
           />
         </Form.Item>
         <Form.Item
-          label="Catégorie"
-          name="categorie_id"
-          rules={[{ required: true, message: 'Veuillez sélectionner une catégorie' }]}
+          label="Durée de jeu (minutes)"
+          name="playing_time"
+          rules={[
+            { required: true, message: 'Veuillez entrer la durée de jeu' },
+            { type: 'number', min: 1, max: 1440, message: 'Durée entre 1 et 1440 minutes' }
+          ]}
         >
-          <Select>
+          <InputNumber min={1} max={1440} style={{ width: '100%' }} placeholder="Ex: 60" />
+        </Form.Item>
+        <Form.Item
+          label="Catégories"
+          name="categorie_ids"
+          rules={[{ required: true, message: 'Veuillez sélectionner au moins une catégorie' }]}
+        >
+          <Select
+            mode="multiple"
+            placeholder="Sélectionnez une ou plusieurs catégories"
+            optionFilterProp="children"
+          >
             {categories.map(cat => (
               <Select.Option key={cat.CategorieID} value={cat.CategorieID}>
                 {cat.Name}

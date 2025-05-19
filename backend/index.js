@@ -233,7 +233,65 @@ app.delete('/api/admin/users/:userId', async (req, res) => {
 // 3. Game Management
 app.get('/api/games', async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM Jeu');
+    const { categorie_ids, age, duree, note, search, order_by } = req.query;
+    let sql = 'SELECT DISTINCT j.* FROM Jeu j';
+    const params = [];
+    let joins = '';
+    let wheres = [];
+
+    if (categorie_ids) {
+      joins += ' JOIN CategorieJeu cj ON j.JeuID = cj.JeuID';
+      const ids = categorie_ids.split(',').map(Number).filter(Boolean);
+      if (ids.length > 0) {
+        wheres.push(`cj.CategorieID IN (${ids.map(() => '?').join(',')})`);
+        params.push(...ids);
+      }
+    }
+    if (age) {
+      wheres.push('j.MinAge <= ?');
+      params.push(Number(age));
+    }
+    if (duree) {
+      wheres.push('j.PlayingTime IS NOT NULL AND j.PlayingTime <= SEC_TO_TIME(? * 60)');
+      params.push(Number(duree));
+    }
+    if (note) {
+      const noteValue = Math.min(Number(note), 5);
+      wheres.push('j.Average >= ?');
+      params.push(noteValue);
+    }
+    if (search) {
+      wheres.push('j.Nom LIKE ?');
+      params.push(`%${search}%`);
+    }
+
+    if (joins) sql += joins;
+    if (wheres.length > 0) sql += ' WHERE ' + wheres.join(' AND ');
+
+    // Ajout du tri dynamique
+    let orderSql = '';
+    switch (order_by) {
+      case 'Nom_DESC':
+        orderSql = ' ORDER BY j.Nom DESC';
+        break;
+      case 'Note_DESC':
+        orderSql = ' ORDER BY j.Average DESC';
+        break;
+      case 'Note_ASC':
+        orderSql = ' ORDER BY j.Average ASC';
+        break;
+      case 'Duree_ASC':
+        orderSql = ' ORDER BY j.PlayingTime ASC';
+        break;
+      case 'Duree_DESC':
+        orderSql = ' ORDER BY j.PlayingTime DESC';
+        break;
+      default:
+        orderSql = ' ORDER BY j.Nom ASC';
+    }
+    sql += orderSql;
+
+    const [rows] = await pool.query(sql, params);
     res.json({ success: true, data: rows });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -257,23 +315,24 @@ app.get('/api/games/:id', async (req, res) => {
 });
 
 app.post('/api/games', async (req, res) => {
-  const { nom, description, age_min, age_max, min_players, max_players, categorie_id, createur_id } = req.body;
-  console.log('POST /api/games body:', req.body);
-  if (!nom || !description || age_min == null || age_max == null || min_players == null || max_players == null || !categorie_id || !createur_id) {
+  const { nom, description, age_min, age_max, min_players, max_players, playing_time, categorie_ids, createur_id } = req.body;
+  if (!nom || !description || age_min == null || age_max == null || min_players == null || max_players == null || !playing_time || !categorie_ids || !Array.isArray(categorie_ids) || categorie_ids.length === 0 || !createur_id) {
     return res.status(400).json({ success: false, error: 'Missing fields' });
   }
   try {
-    // Use correct column names
     const [result] = await pool.query(
-      'INSERT INTO Jeu (Nom, description, MinAge, MaxAge, MinPlayers, MaxPlayers) VALUES (?, ?, ?, ?, ?, ?)',
-      [nom, description, age_min, age_max, min_players, max_players]
+      'INSERT INTO Jeu (Nom, description, MinAge, MaxAge, MinPlayers, MaxPlayers, PlayingTime) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [nom, description, age_min, age_max, min_players, max_players, playing_time]
     );
     const jeuId = result.insertId;
 
-    await pool.query(
-      'INSERT INTO CategorieJeu (JeuID, CategorieID) VALUES (?, ?)',
-      [jeuId, categorie_id]
-    );
+    // Insérer chaque catégorie sélectionnée
+    for (const catId of categorie_ids) {
+      await pool.query(
+        'INSERT INTO CategorieJeu (JeuID, CategorieID) VALUES (?, ?)',
+        [jeuId, catId]
+      );
+    }
 
     await pool.query(
       'INSERT INTO CreationJeu (UserID, JeuID) VALUES (?, ?)',
@@ -532,6 +591,17 @@ app.get('/api/age-moyen-categorie/:catId', async (req, res) => {
   try {
     const [rows] = await pool.query('SELECT AgeMoyenCategorie(?) AS age_moyen', [catId]);
     res.json({ success: true, age_moyen: rows[0].age_moyen });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Récupérer le nombre de jeux créés par un utilisateur via la fonction stockée
+app.get('/api/jeux-crees-par/:userId', async (req, res) => {
+  const userId = req.params.userId;
+  try {
+    const [rows] = await pool.query('SELECT GetJeuxCreePar(?) AS nb_jeux', [userId]);
+    res.json({ success: true, nb_jeux: rows[0].nb_jeux });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

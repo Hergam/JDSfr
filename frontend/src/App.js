@@ -15,6 +15,8 @@ import NotFound from './pages/NotFound';
 import GameDetails from './pages/GameDetails';
 import Admin from './pages/Admin';
 import CreateGame from './pages/CreateGame';
+import Profile from './pages/Profile';
+import MesJeux from './pages/MesJeux';
 
 const { Content } = Layout;
 
@@ -33,6 +35,8 @@ function App() {
                 <Route path="/game/:id" element={<GameDetails />} />
                 <Route path="/admin" element={<Admin />} />
                 <Route path="/create-game" element={<CreateGame />} />
+                <Route path="/profile" element={<Profile />} />
+                <Route path="/mes-jeux" element={<MesJeux />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </div>
