@@ -22,7 +22,7 @@ function CreateGame() {
   })();
 
   useEffect(() => {
-    if (!user || user.statut !== 'Editeur') {
+    if (!user || (user.statut !== 'Editeur' && user.statut !== 'Admin')) {
       message.error("Accès réservé aux éditeurs.");
       navigate('/');
       return;

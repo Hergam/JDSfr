@@ -87,7 +87,7 @@ function Header() {
           >
             Accueil
           </Button>
-          {user?.statut === 'Editeur' && (
+          {(user?.statut === 'Editeur' || user?.statut === 'Admin') && (
             <Button
               type="text"
               icon={<UserOutlined />}
@@ -104,7 +104,7 @@ function Header() {
               Mes Jeux
             </Button>
           )}
-          {user?.statut === 'Editeur' && (
+          {(user?.statut === 'Editeur' || user?.statut === 'Admin') && (
             <Button
               type="text"
               icon={<PlusCircleOutlined />}
