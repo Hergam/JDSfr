@@ -302,6 +302,19 @@ BEGIN
 END;
 //
 
+DELIMITER //
+
+CREATE PROCEDURE GetJeuxCreatedByUser(IN p_UserID INT)
+BEGIN
+    SELECT j.*
+    FROM Jeu j
+    JOIN CreationJeu cj ON j.JeuID = cj.JeuID
+    WHERE cj.UserID = p_UserID;
+END;
+//
+
+DELIMITER ;
+
 CREATE FUNCTION AgeMoyenCategorie(cat_id INT)
 RETURNS DECIMAL(5,2)
 DETERMINISTIC

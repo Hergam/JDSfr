@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { Typography, Button, Table, message, Spin } from 'antd';
-import { EditOutlined } from '@ant-design/icons';
+import { Typography, message, Spin } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import GamesList from '../components/GamesList';
 
 const { Title } = Typography;
 
@@ -32,7 +32,7 @@ function MesJeux() {
   const fetchJeux = async () => {
     setLoading(true);
     try {
-      const res = await api.get(`/api/jeux-crees-par/${user.id}`);
+      const res = await api.get(`/api/jeux-crees/${user.id}`);
       if (res.data.success) {
         setJeux(res.data.data);
       } else {
@@ -46,37 +46,15 @@ function MesJeux() {
     }
   };
 
-  const columns = [
-    { title: 'Nom', dataIndex: 'Nom', key: 'Nom' },
-    { title: 'Âge min', dataIndex: 'MinAge', key: 'MinAge' },
-    { title: 'Âge max', dataIndex: 'MaxAge', key: 'MaxAge' },
-    { title: 'Joueurs min', dataIndex: 'MinPlayers', key: 'MinPlayers' },
-    { title: 'Joueurs max', dataIndex: 'MaxPlayers', key: 'MaxPlayers' },
-    {
-      title: 'Actions',
-      key: 'actions',
-      render: (_, jeu) => (
-        <Button
-          icon={<EditOutlined />}
-          onClick={() => navigate(`/edit-game/${jeu.JeuID}`)}
-        >
-          Modifier
-        </Button>
-      ),
-    },
-  ];
-
   return (
     <div style={{ maxWidth: 900, margin: '32px auto' }}>
       <Title level={2}>Mes Jeux Créés</Title>
       {loading ? (
         <Spin />
       ) : (
-        <Table
-          dataSource={jeux}
-          columns={columns}
-          rowKey="JeuID"
-          pagination={false}
+        <GamesList
+          games={jeux}
+          loading={loading}
         />
       )}
     </div>

@@ -315,14 +315,14 @@ app.get('/api/games/:id', async (req, res) => {
 });
 
 app.post('/api/games', async (req, res) => {
-  const { nom, description, age_min, age_max, min_players, max_players, playing_time, categorie_ids, createur_id } = req.body;
-  if (!nom || !description || age_min == null || age_max == null || min_players == null || max_players == null || !playing_time || !categorie_ids || !Array.isArray(categorie_ids) || categorie_ids.length === 0 || !createur_id) {
+  const { nom, description, age_min, min_players, max_players, playing_time, categorie_ids, createur_id } = req.body;
+  if (!nom || !description || age_min == null || min_players == null || max_players == null || !playing_time || !categorie_ids || !Array.isArray(categorie_ids) || categorie_ids.length === 0 || !createur_id) {
     return res.status(400).json({ success: false, error: 'Missing fields' });
   }
   try {
     const [result] = await pool.query(
-      'INSERT INTO Jeu (Nom, description, MinAge, MaxAge, MinPlayers, MaxPlayers, PlayingTime) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [nom, description, age_min, age_max, min_players, max_players, playing_time]
+      'INSERT INTO Jeu (Nom, description, MinAge, MinPlayers, MaxPlayers, PlayingTime) VALUES (?, ?, ?, ?, ?, ?)',
+      [nom, description, age_min, min_players, max_players, playing_time]
     );
     const jeuId = result.insertId;
 
@@ -362,14 +362,14 @@ app.post('/api/games', async (req, res) => {
 
 app.put('/api/games/:jeuId', async (req, res) => {
   const jeuId = req.params.jeuId;
-  const { nom, description, age_min, age_max, categorie_id } = req.body;
-  if (!nom || !description || !age_min || !age_max || !categorie_id) {
+  const { nom, description, age_min, categorie_id } = req.body;
+  if (!nom || !description || !age_min || !categorie_id) {
     return res.status(400).json({ success: false, error: 'Missing fields' });
   }
   try {
     await pool.query(
-      'UPDATE Jeu SET Nom = ?, Description = ?, AgeMin = ?, AgeMax = ?, CategorieID = ? WHERE JeuID = ?',
-      [nom, description, age_min, age_max, categorie_id, jeuId]
+      'UPDATE Jeu SET Nom = ?, Description = ?, MinAge = ?, CategorieID = ? WHERE JeuID = ?',
+      [nom, description, age_min, categorie_id, jeuId]
     );
     res.json({ success: true, message: 'Game updated' });
   } catch (err) {
@@ -435,8 +435,10 @@ app.get('/api/games-by-age-range', async (req, res) => {
 app.get('/api/jeux-crees/:userId', async (req, res) => {
   const userId = req.params.userId;
   try {
-    const [rows] = await pool.query('SELECT GetJeuxCreePar(?) AS nb_jeux', [userId]);
-    res.json({ success: true, nb_jeux: rows[0].nb_jeux });
+    // Utilise la procédure stockée pour récupérer la liste des jeux créés par l'utilisateur
+    const [rows] = await pool.query('CALL GetJeuxCreatedByUser(?)', [userId]);
+    // rows[0] contient la liste des jeux
+    res.json({ success: true, data: rows[0] });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

@@ -59,7 +59,6 @@ function CreateGame() {
         nom: values.nom,
         description: values.description,
         age_min: values.age_range[0],
-        age_max: values.age_range[1],
         min_players: values.players_range[0],
         max_players: values.players_range[1],
         playing_time: playingTime,
@@ -119,16 +118,18 @@ function CreateGame() {
           />
         </Form.Item>
         <Form.Item
-          label="Âge recommandé (min - max)"
+          label="Âge recommandé (min)"
           name="age_range"
-          rules={[{ required: true, message: 'Veuillez sélectionner la tranche d\'âge' }]}
+          rules={[{ required: true, message: 'Veuillez sélectionner l\'âge minimum' }]}
         >
           <Slider
-            range
             min={1}
             max={99}
             marks={{ 3: '3', 6: '6', 8: '8', 12: '12', 16: '16', 18: '18', 99: '99+' }}
             tooltip={{ open: true }}
+            range={false}
+            trackStyle={{ backgroundColor: '#d9d9d9' }}
+            railStyle={{ backgroundColor: '#d9d9d9' }}
           />
         </Form.Item>
         <Form.Item

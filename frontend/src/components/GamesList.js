@@ -38,7 +38,6 @@ function GamesList({ games = [], loading = false, renderActions }) {
 
   return (
     <div className="games-list">
-      <Title level={2}>Liste des Jeux</Title>
       
       {gamesToRender.length === 0 ? (
         <Empty description="Aucun jeu disponible" />
