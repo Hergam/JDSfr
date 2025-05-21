@@ -17,6 +17,8 @@ import Admin from './pages/Admin';
 import CreateGame from './pages/CreateGame';
 import Profile from './pages/Profile';
 import MesJeux from './pages/MesJeux';
+import Editeur from './pages/Editeur';
+import EditGame from './pages/EditGame';
 
 const { Content } = Layout;
 
@@ -33,10 +35,12 @@ function App() {
                 <Route path="/login" element={<Login />} />
                 <Route path="/register" element={<Register />} />
                 <Route path="/game/:id" element={<GameDetails />} />
+                <Route path="/user/:id" element={<Editeur />} />
                 <Route path="/admin" element={<Admin />} />
                 <Route path="/create-game" element={<CreateGame />} />
                 <Route path="/profile" element={<Profile />} />
                 <Route path="/mes-jeux" element={<MesJeux />} />
+                <Route path="/edit-game/:jeuId" element={<EditGame />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </div>

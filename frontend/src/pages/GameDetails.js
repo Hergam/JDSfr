@@ -124,6 +124,16 @@ function GameDetails() {
     }
   };
 
+  const handleDeleteReview = async (reviewId) => {
+    try {
+      await api.delete(`/api/review/${reviewId}`);
+      message.success('Avis supprimé.');
+      fetchGameReviews();
+    } catch (err) {
+      message.error("Erreur lors de la suppression de l'avis");
+    }
+  };
+
   if (loading) {
     return <div style={{ textAlign: 'center', padding: '50px' }}><Spin size="large" /></div>;
   }
@@ -190,7 +200,19 @@ function GameDetails() {
           
           <Col xs={24} md={16}>
             <Title level={2}>{game.Nom}</Title>
-            
+            {/* Affichage du créateur */}
+            {game.CreateurNom && (
+              <div style={{ marginBottom: 12 }}>
+                <Text type="secondary">
+                  Créé par&nbsp;
+                  {game.CreateurID ? (
+                    <Link to={`/user/${game.CreateurID}`}>{game.CreateurNom}</Link>
+                  ) : (
+                    game.CreateurNom
+                  )}
+                </Text>
+              </div>
+            )}
             <Divider />
 
             <Descriptions bordered column={1}>
@@ -281,7 +303,18 @@ function GameDetails() {
           dataSource={reviews}
           renderItem={review => (
             <List.Item>
-              <Card style={{ width: '100%' }}>
+              <Card style={{ width: '100%', position: 'relative' }}>
+                {/* Supprimer dans la box, en haut à droite */}
+                {user && review.UserID === user.id && (
+                  <Button
+                    danger
+                    size="small"
+                    onClick={() => handleDeleteReview(review.AvisID)}
+                    style={{ position: 'absolute', top: 10, right: 10, zIndex: 1 }}
+                  >
+                    Supprimer
+                  </Button>
+                )}
                 <div style={{ display: 'flex', alignItems: 'flex-start', marginBottom: 10 }}>
                   <Avatar icon={<UserOutlined />} style={{ marginRight: 15 }} />
                   <div>

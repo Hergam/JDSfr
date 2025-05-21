@@ -1,18 +1,23 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { Card, Typography, Form, Input, Button, Select, message, Spin, Slider, InputNumber } from 'antd';
 import api from '../services/api';
 
 const { Title } = Typography;
 
-function CreateGame() {
+function EditGame() {
   const [form] = Form.useForm();
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [game, setGame] = useState(null);
+  const [selectedCategories, setSelectedCategories] = useState([]);
+  const [playersRange, setPlayersRange] = useState([2, 4]);
+  const [playingTime, setPlayingTime] = useState(60);
+  const [minAge, setMinAge] = useState(8);
   const navigate = useNavigate();
+  const { jeuId } = useParams();
 
-  // Vérifie le statut utilisateur
   const user = (() => {
     try {
       return JSON.parse(localStorage.getItem('user'));
@@ -28,8 +33,9 @@ function CreateGame() {
       return;
     }
     fetchCategories();
-  // eslint-disable-next-line
-  }, []);
+    fetchGame();
+    // eslint-disable-next-line
+  }, [jeuId]);
 
   const fetchCategories = async () => {
     try {
@@ -39,6 +45,34 @@ function CreateGame() {
       }
     } catch {
       message.error("Impossible de charger les catégories");
+    }
+  };
+
+  const fetchGame = async () => {
+    setLoading(true);
+    try {
+      const res = await api.get(`/api/games/${jeuId}`);
+      if (res.data.success) {
+        setGame(res.data.data);
+        setPlayersRange([res.data.data.MinPlayers, res.data.data.MaxPlayers]);
+        setPlayingTime(res.data.data.PlayingTime ? parseInt(res.data.data.PlayingTime.split(':')[0], 10) * 60 + parseInt(res.data.data.PlayingTime.split(':')[1], 10) : 60);
+        setMinAge(res.data.data.MinAge || 8);
+        // Récupérer les catégories du jeu
+        const catRes = await api.get(`/api/game-full-details/${jeuId}`);
+        if (catRes.data && catRes.data.categories) {
+          setSelectedCategories(catRes.data.categories.map(c => c.CategorieID));
+        }
+        form.setFieldsValue({
+          nom: res.data.data.Nom,
+          description: res.data.data.description,
+        });
+      } else {
+        message.error("Jeu non trouvé");
+        navigate('/mes-jeux');
+      }
+    } catch {
+      message.error("Erreur lors du chargement du jeu");
+      navigate('/mes-jeux');
     } finally {
       setLoading(false);
     }
@@ -47,55 +81,46 @@ function CreateGame() {
   const onFinish = async (values) => {
     setSubmitting(true);
     try {
-      // Conversion minutes -> HH:MM:00
-      let playingTime = null;
-      if (values.playing_time !== undefined && values.playing_time !== null) {
-        const min = parseInt(values.playing_time, 10) || 0;
+      let playingTimeStr = null;
+      if (playingTime !== undefined && playingTime !== null) {
+        const min = parseInt(playingTime, 10) || 0;
         const h = Math.floor(min / 60);
         const m = min % 60;
-        playingTime = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:00`;
+        playingTimeStr = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:00`;
       }
-      // Correction : toujours envoyer min_age (issu du slider ou valeur par défaut)
-      const min_age =
-        typeof values.age_range === 'number'
-          ? values.age_range
-          : Array.isArray(values.age_range)
-            ? values.age_range[0]
-            : 8; // valeur par défaut si non défini
-
-      await api.post('/api/games', {
+      // Met à jour le jeu principal
+      await api.put(`/api/games/${jeuId}`, {
         nom: values.nom,
         description: values.description,
-        age_min: min_age,
-        min_players: values.players_range[0],
-        max_players: values.players_range[1],
-        playing_time: playingTime,
-        categorie_ids: values.categorie_ids,
-        createur_id: user.id
+        age_min: minAge,
+        min_players: playersRange[0],
+        max_players: playersRange[1],
+        playing_time: playingTimeStr,
+        categorie_ids: selectedCategories
       });
-      message.success('Jeu créé avec succès !');
-      navigate('/');
+      message.success('Jeu modifié avec succès !');
+      navigate('/mes-jeux');
     } catch (err) {
-      message.error("Erreur lors de la création du jeu");
+      message.error("Erreur lors de la modification du jeu");
     } finally {
       setSubmitting(false);
     }
   };
 
-  if (loading) {
+  if (loading || !game) {
     return <div style={{ textAlign: 'center', padding: 50 }}><Spin /></div>;
   }
 
   return (
     <Card style={{ maxWidth: 600, margin: '40px auto' }}>
-      <Title level={2}>Créer un nouveau jeu</Title>
+      <Title level={2}>Modifier le jeu</Title>
       <Form
         form={form}
         layout="vertical"
         onFinish={onFinish}
         initialValues={{
-          age_range: 8, // Correction : valeur par défaut simple (slider simple)
-          players_range: [2, 4]
+          nom: game.Nom,
+          description: game.description,
         }}
       >
         <Form.Item
@@ -114,8 +139,6 @@ function CreateGame() {
         </Form.Item>
         <Form.Item
           label="Nombre de joueurs (min - max)"
-          name="players_range"
-          rules={[{ required: true, message: 'Veuillez sélectionner le nombre de joueurs' }]}
         >
           <Slider
             range
@@ -123,12 +146,12 @@ function CreateGame() {
             max={20}
             marks={{ 1: '1', 2: '2', 4: '4', 6: '6', 8: '8', 10: '10', 20: '20+' }}
             tooltip={{ open: true }}
+            value={playersRange}
+            onChange={setPlayersRange}
           />
         </Form.Item>
         <Form.Item
           label="Âge recommandé (min)"
-          name="age_range"
-          rules={[{ required: true, message: 'Veuillez sélectionner l\'âge minimum' }]}
         >
           <Slider
             min={1}
@@ -138,27 +161,31 @@ function CreateGame() {
             range={false}
             trackStyle={{ backgroundColor: '#d9d9d9' }}
             railStyle={{ backgroundColor: '#d9d9d9' }}
+            value={minAge}
+            onChange={setMinAge}
           />
         </Form.Item>
         <Form.Item
           label="Durée de jeu (minutes)"
-          name="playing_time"
-          rules={[
-            { required: true, message: 'Veuillez entrer la durée de jeu' },
-            { type: 'number', min: 1, max: 1440, message: 'Durée entre 1 et 1440 minutes' }
-          ]}
         >
-          <InputNumber min={1} max={1440} style={{ width: '100%' }} placeholder="Ex: 60" />
+          <InputNumber
+            min={1}
+            max={1440}
+            style={{ width: '100%' }}
+            value={playingTime}
+            onChange={setPlayingTime}
+            placeholder="Ex: 60"
+          />
         </Form.Item>
         <Form.Item
           label="Catégories"
-          name="categorie_ids"
-          rules={[{ required: true, message: 'Veuillez sélectionner au moins une catégorie' }]}
         >
           <Select
             mode="multiple"
             placeholder="Sélectionnez une ou plusieurs catégories"
             optionFilterProp="children"
+            value={selectedCategories}
+            onChange={setSelectedCategories}
           >
             {categories.map(cat => (
               <Select.Option key={cat.CategorieID} value={cat.CategorieID}>
@@ -169,7 +196,7 @@ function CreateGame() {
         </Form.Item>
         <Form.Item>
           <Button type="primary" htmlType="submit" loading={submitting}>
-            Créer le jeu
+            Enregistrer les modifications
           </Button>
         </Form.Item>
       </Form>
@@ -177,4 +204,4 @@ function CreateGame() {
   );
 }
 
-export default CreateGame;
+export default EditGame;

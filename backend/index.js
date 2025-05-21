@@ -106,6 +106,7 @@ app.get('/api/user/:userId', async (req, res) => {
     }
     res.json({ success: true, user: rows[0] });
   } catch (err) {
+    console.error("Erreur dans /api/user/:userId :", err); // Affiche l'objet d'erreur complet
     res.status(500).json({ success: false, error: err.message });
   }
 });
@@ -203,30 +204,53 @@ app.put('/api/admin/users/:userId', async (req, res) => {
 
 app.delete('/api/admin/users/:userId', async (req, res) => {
   const targetUserId = req.params.userId;
-  
-  // Check if user is admin
   const authHeader = req.headers.authorization;
   if (!authHeader) {
     return res.status(401).json({ success: false, error: 'Authorization required' });
   }
 
+  const conn = await pool.getConnection();
   try {
+    await conn.beginTransaction();
+
     const adminId = parseInt(authHeader.split(' ')[1]);
-    const [admins] = await pool.query(
+    const [admins] = await conn.query(
       'SELECT UserID FROM Utilisateur WHERE UserID = ? AND Statut = "Admin"',
       [adminId]
     );
-    
     if (admins.length === 0) {
+      await conn.rollback();
       return res.status(403).json({ success: false, error: 'Admin access required' });
     }
-    
-    // Delete user
-    await pool.query('DELETE FROM Utilisateur WHERE UserID = ?', [targetUserId]);
-    
+
+    await conn.query(
+      `DELETE FROM Commentaire WHERE UserID = ?`,
+      [targetUserId]
+    );
+    await conn.query(
+      `DELETE FROM Avis WHERE UserID = ?`,
+      [targetUserId]
+    );
+    await conn.query(
+      `DELETE FROM CreationJeu WHERE UserID = ?`,
+      [targetUserId]
+    );
+    await conn.query(
+      `DELETE FROM JeuFavoriUser WHERE UserID = ?`,
+      [targetUserId]
+    );
+    // Ajoutez ici d'autres suppressions liées si besoin
+
+    await conn.query('DELETE FROM Utilisateur WHERE UserID = ?', [targetUserId]);
+
+    await conn.commit();
     res.json({ success: true, message: 'User deleted successfully' });
   } catch (err) {
+    await conn.rollback();
+    console.error("Erreur lors de la deletion de l'utilisateur :", err.message);
     res.status(500).json({ success: false, error: err.message });
+  } finally {
+    conn.release();
   }
 });
 
@@ -302,12 +326,18 @@ app.get('/api/games', async (req, res) => {
 app.get('/api/games/:id', async (req, res) => {
   const gameId = req.params.id;
   try {
-    const [rows] = await pool.query('SELECT * FROM Jeu WHERE JeuID = ?', [gameId]);
-    
+    // Récupère le jeu et le créateur (nom et id)
+    const [rows] = await pool.query(
+      `SELECT j.*, u.UserID AS CreateurID, u.Nom AS CreateurNom
+       FROM Jeu j
+       LEFT JOIN CreationJeu cj ON j.JeuID = cj.JeuID
+       LEFT JOIN Utilisateur u ON cj.UserID = u.UserID
+       WHERE j.JeuID = ?`,
+      [gameId]
+    );
     if (rows.length === 0) {
       return res.status(404).json({ success: false, error: 'Jeu non trouvé' });
     }
-    
     res.json({ success: true, data: rows[0] });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -317,31 +347,35 @@ app.get('/api/games/:id', async (req, res) => {
 app.post('/api/games', async (req, res) => {
   const { nom, description, age_min, min_players, max_players, playing_time, categorie_ids, createur_id } = req.body;
   if (!nom || !description || age_min == null || min_players == null || max_players == null || !playing_time || !categorie_ids || !Array.isArray(categorie_ids) || categorie_ids.length === 0 || !createur_id) {
+    console.error('Missing fields in POST /api/games:', req.body);
     return res.status(400).json({ success: false, error: 'Missing fields' });
   }
+  const conn = await pool.getConnection();
   try {
-    const [result] = await pool.query(
+    await conn.beginTransaction();
+
+    const [result] = await conn.query(
       'INSERT INTO Jeu (Nom, description, MinAge, MinPlayers, MaxPlayers, PlayingTime) VALUES (?, ?, ?, ?, ?, ?)',
       [nom, description, age_min, min_players, max_players, playing_time]
     );
     const jeuId = result.insertId;
 
-    // Insérer chaque catégorie sélectionnée
     for (const catId of categorie_ids) {
-      await pool.query(
+      await conn.query(
         'INSERT INTO CategorieJeu (JeuID, CategorieID) VALUES (?, ?)',
         [jeuId, catId]
       );
     }
 
-    await pool.query(
+    await conn.query(
       'INSERT INTO CreationJeu (UserID, JeuID) VALUES (?, ?)',
       [createur_id, jeuId]
     );
 
+    await conn.commit();
     res.json({ success: true, message: 'Game added' });
   } catch (err) {
-    // Gestion d'erreur explicite pour violation de trigger SQL ou clé étrangère
+    await conn.rollback();
     if (
       err.code === 'ER_SIGNAL_EXCEPTION' ||
       (err.errno === 1644) ||
@@ -357,33 +391,75 @@ app.post('/api/games', async (req, res) => {
     }
     console.error('Error in POST /api/games:', err);
     res.status(500).json({ success: false, error: err.message });
+  } finally {
+    conn.release();
   }
 });
 
 app.put('/api/games/:jeuId', async (req, res) => {
   const jeuId = req.params.jeuId;
-  const { nom, description, age_min, categorie_id } = req.body;
-  if (!nom || !description || !age_min || !categorie_id) {
+  const { nom, description, age_min, min_players, max_players, playing_time, categorie_ids } = req.body;
+  if (!nom || !description || !age_min || min_players == null || max_players == null || !playing_time || !categorie_ids || !Array.isArray(categorie_ids) || categorie_ids.length === 0) {
+    console.log('missing fields in put /api/games/:jeuId :', req.body);
     return res.status(400).json({ success: false, error: 'Missing fields' });
   }
+  const conn = await pool.getConnection();
   try {
-    await pool.query(
-      'UPDATE Jeu SET Nom = ?, Description = ?, MinAge = ?, CategorieID = ? WHERE JeuID = ?',
-      [nom, description, age_min, categorie_id, jeuId]
+    await conn.beginTransaction();
+
+    // Met à jour les champs principaux du jeu
+    await conn.query(
+      'UPDATE Jeu SET Nom = ?, Description = ?, MinAge = ?, MinPlayers = ?, MaxPlayers = ?, PlayingTime = ? WHERE JeuID = ?',
+      [nom, description, age_min, min_players, max_players, playing_time, jeuId]
     );
+
+    // Met à jour les catégories (remplace toutes les anciennes par les nouvelles)
+    await conn.query('DELETE FROM CategorieJeu WHERE JeuID = ?', [jeuId]);
+    for (const catId of categorie_ids) {
+      await conn.query(
+        'INSERT INTO CategorieJeu (JeuID, CategorieID) VALUES (?, ?)',
+        [jeuId, catId]
+      );
+    }
+
+    await conn.commit();
     res.json({ success: true, message: 'Game updated' });
   } catch (err) {
+    await conn.rollback();
+    console.error('Error in put /api/games/:jeuId :', err);
     res.status(500).json({ success: false, error: err.message });
+  } finally {
+    conn.release();
   }
 });
 
 app.delete('/api/games/:jeuId', async (req, res) => {
   const jeuId = req.params.jeuId;
+  const conn = await pool.getConnection();
   try {
-    await pool.query('DELETE FROM Jeu WHERE JeuID = ?', [jeuId]);
+    await conn.beginTransaction();
+
+    await conn.query('DELETE FROM Commentaire WHERE AvisID IN (SELECT AvisID FROM Avis WHERE JeuID = ?)', [jeuId]);
+    await conn.query('DELETE FROM Avis WHERE JeuID = ?', [jeuId]);
+    await conn.query('DELETE FROM CreationJeu WHERE JeuID = ?', [jeuId]);
+    await conn.query('DELETE FROM JeuFavoriUser WHERE JeuID = ?', [jeuId]);
+    await conn.query('DELETE FROM CategorieJeu WHERE JeuID = ?', [jeuId]);
+    await conn.query('DELETE FROM FamillesJeu WHERE JeuID = ?', [jeuId]);
+    await conn.query('DELETE FROM MechaniquesJeu WHERE JeuID = ?', [jeuId]);
+    await conn.query('DELETE FROM ArtisteJeu WHERE JeuID = ?', [jeuId]);
+    await conn.query('DELETE FROM DesignJeu WHERE JeuID = ?', [jeuId]);
+    await conn.query('DELETE FROM Extension WHERE JeuID = ?', [jeuId]);
+    await conn.query('DELETE FROM Implementation WHERE JeuID = ?', [jeuId]);
+    await conn.query('DELETE FROM Jeu WHERE JeuID = ?', [jeuId]);
+
+    await conn.commit();
     res.json({ success: true, message: 'Game deleted' });
   } catch (err) {
+    await conn.rollback();
+    console.error("Erreur lors de la deletion du jeu :", err.message);
     res.status(500).json({ success: false, error: err.message });
+  } finally {
+    conn.release();
   }
 });
 
@@ -405,6 +481,7 @@ app.get('/api/game-full-details/:jeuId', async (req, res) => {
       commentaires: results[8]
     });
   } catch (err) {
+    console.error("Erreur lors de la requete de gamefulldetails :", err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
@@ -459,11 +536,14 @@ app.post('/api/add-favorite', async (req, res) => {
   if (!userId || !jeuId) {
     return res.status(400).json({ success: false, error: 'Missing fields' });
   }
+  const conn = await pool.getConnection();
   try {
-    await pool.query('CALL AddFavoriteGame(?, ?)', [userId, jeuId]);
+    await conn.beginTransaction();
+    await conn.query('CALL AddFavoriteGame(?, ?)', [userId, jeuId]);
+    await conn.commit();
     res.json({ success: true, message: 'Favorite game added' });
   } catch (err) {
-    // Gestion explicite du trigger SQL (limite de 20 favoris)
+    await conn.rollback();
     if (
       err.code === 'ER_SIGNAL_EXCEPTION' ||
       (err.errno === 1644) ||
@@ -473,6 +553,8 @@ app.post('/api/add-favorite', async (req, res) => {
       return res.status(403).json({ success: false, error: "Vous ne pouvez pas avoir plus de 20 jeux favoris." });
     }
     res.status(500).json({ success: false, error: err.message });
+  } finally {
+    conn.release();
   }
 });
 
@@ -491,11 +573,17 @@ app.delete('/api/remove-favorite', async (req, res) => {
   if (!userId || !jeuId) {
     return res.status(400).json({ success: false, error: 'Missing fields' });
   }
+  const conn = await pool.getConnection();
   try {
-    await pool.query('DELETE FROM JeuFavoriUser WHERE UserID = ? AND JeuID = ?', [userId, jeuId]);
+    await conn.beginTransaction();
+    await conn.query('DELETE FROM JeuFavoriUser WHERE UserID = ? AND JeuID = ?', [userId, jeuId]);
+    await conn.commit();
     res.json({ success: true, message: 'Favorite removed' });
   } catch (err) {
+    await conn.rollback();
     res.status(500).json({ success: false, error: err.message });
+  } finally {
+    conn.release();
   }
 });
 
@@ -505,11 +593,14 @@ app.post('/api/add-review', async (req, res) => {
   if (!contenu || !note || !jeuId || !userId) {
     return res.status(400).json({ success: false, error: 'Missing fields' });
   }
+  const conn = await pool.getConnection();
   try {
-    await pool.query('CALL AddReview(?, ?, ?, ?)', [contenu, note, jeuId, userId]);
+    await conn.beginTransaction();
+    await conn.query('CALL AddReview(?, ?, ?, ?)', [contenu, note, jeuId, userId]);
+    await conn.commit();
     res.json({ success: true, message: 'Review added' });
   } catch (err) {
-    // Gestion de l'erreur du trigger (SQLSTATE '45000')
+    await conn.rollback();
     if (
       err.code === 'ER_SIGNAL_EXCEPTION' ||
       (err.errno === 1644) ||
@@ -519,6 +610,8 @@ app.post('/api/add-review', async (req, res) => {
       return res.status(409).json({ success: false, error: "Vous avez déjà laissé un avis pour ce jeu." });
     }
     res.status(500).json({ success: false, error: err.message });
+  } finally {
+    conn.release();
   }
 });
 
@@ -551,11 +644,17 @@ app.get('/api/user-reviews/:userId', async (req, res) => {
 
 app.delete('/api/review/:reviewId', async (req, res) => {
   const reviewId = req.params.reviewId;
+  const conn = await pool.getConnection();
   try {
-    await pool.query('DELETE FROM Avis WHERE AvisID = ?', [reviewId]);
+    await conn.beginTransaction();
+    await conn.query('DELETE FROM Avis WHERE AvisID = ?', [reviewId]);
+    await conn.commit();
     res.json({ success: true, message: 'Review deleted' });
   } catch (err) {
+    await conn.rollback();
     res.status(500).json({ success: false, error: err.message });
+  } finally {
+    conn.release();
   }
 });
 

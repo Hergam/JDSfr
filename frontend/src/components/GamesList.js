@@ -10,9 +10,15 @@ function GamesList({ games = [], loading = false, renderActions }) {
   const [fetchedGames, setFetchedGames] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Ne pas fetcher tous les jeux si une liste est passée en props
   useEffect(() => {
-    fetchGames();
-  }, []);
+    if (!games || games.length === 0) {
+      fetchGames();
+    } else {
+      setIsLoading(false);
+    }
+    // eslint-disable-next-line
+  }, [games]);
 
   const fetchGames = async () => {
     try {
@@ -38,7 +44,6 @@ function GamesList({ games = [], loading = false, renderActions }) {
 
   return (
     <div className="games-list">
-      
       {gamesToRender.length === 0 ? (
         <Empty description="Aucun jeu disponible" />
       ) : (
@@ -91,12 +96,16 @@ function GamesList({ games = [], loading = false, renderActions }) {
                     <Tag color="blue">Note: {game.Average}</Tag>
                   )}
                 </div>
-                {/* Centrage des boutons Détails et Favoris */}
-                <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginTop: 16 }}>
+                {/* Boutons centrés, "Détails" puis actions personnalisées en colonne en dessous */}
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, marginTop: 16 }}>
                   <Link to={`/game/${game.JeuID}`}>
-                    <Button type="primary">Détails</Button>
+                    <Button type="primary" style={{ width: 120 }}>Détails</Button>
                   </Link>
-                  {renderActions && renderActions(game)}
+                  {renderActions && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: 120 }}>
+                      {renderActions(game)}
+                    </div>
+                  )}
                 </div>
               </Card>
             </List.Item>
