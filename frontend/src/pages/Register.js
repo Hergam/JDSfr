@@ -115,17 +115,9 @@ function Register() {
             />
           </Form.Item>
           
-          <Form.Item
-            name="statut"
-            rules={[{ required: true, message: 'Veuillez sélectionner votre statut !' }]}
-          >
-            <Select
-              placeholder="Sélectionnez votre statut"
-              size="large"
-            >
-              <Option value="Utilisateur">Utilisateur</Option>
-              <Option value="Editeur">Éditeur</Option>
-            </Select>
+          {/* Champ caché pour statut */}
+          <Form.Item name="statut" initialValue="Utilisateur" style={{ display: 'none' }}>
+            <Input type="hidden" />
           </Form.Item>
 
           <Form.Item>
