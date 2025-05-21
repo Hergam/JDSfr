@@ -239,7 +239,6 @@ app.delete('/api/admin/users/:userId', async (req, res) => {
       `DELETE FROM JeuFavoriUser WHERE UserID = ?`,
       [targetUserId]
     );
-    // Ajoutez ici d'autres suppressions liées si besoin
 
     await conn.query('DELETE FROM Utilisateur WHERE UserID = ?', [targetUserId]);
 

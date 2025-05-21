@@ -9,7 +9,6 @@ const { Title, Paragraph, Text } = Typography;
 function Profile() {
   const [userInfo, setUserInfo] = useState(null);
   const [favorites, setFavorites] = useState([]);
-  const [createdGames, setCreatedGames] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const navigate = useNavigate();
@@ -31,7 +30,7 @@ function Profile() {
     }
     // Reset loading before fetching
     setLoading(true);
-    Promise.all([fetchProfile(), fetchFavorites(), fetchCreatedGames()]).finally(() => setLoading(false));
+    Promise.all([fetchProfile(), fetchFavorites()]).finally(() => setLoading(false));
     // eslint-disable-next-line
   }, []);
 
@@ -55,20 +54,6 @@ function Profile() {
     }
   };
 
-  const fetchCreatedGames = async () => {
-    try {
-      const res = await api.get('/api/games');
-      if (res.data.success) {
-        // Suppose que le backend ne fournit pas une route dédiée, on filtre côté client
-        setCreatedGames(res.data.data.filter(g => g.createur_id === user.id));
-      } else {
-        setCreatedGames([]);
-      }
-    } catch {
-      setCreatedGames([]);
-    }
-  };
-
   if (!userInfo || loading) {
     return <div style={{ textAlign: 'center', padding: 50 }}><Spin /></div>;
   }
@@ -86,20 +71,6 @@ function Profile() {
             </div>
           </div>
         </div>
-        <Divider />
-        <Title level={4}>Jeux créés</Title>
-        {createdGames.length === 0 ? (
-          <Paragraph>Aucun jeu créé.</Paragraph>
-        ) : (
-          <List
-            dataSource={createdGames}
-            renderItem={jeu => (
-              <List.Item>
-                <Link to={`/game/${jeu.JeuID}`}>{jeu.Nom}</Link>
-              </List.Item>
-            )}
-          />
-        )}
         <Divider />
         <Title level={4}>Jeux favoris</Title>
         {favorites.length === 0 ? (
